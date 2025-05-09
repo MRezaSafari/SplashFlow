@@ -1,103 +1,165 @@
-import Image from "next/image";
+"use client";
+import { useCallback, useEffect, useState } from "react";
+import { Input, UnsplashImage } from "./libs/components";
+import type { UnsplashPhoto } from "./libs/models/unsplash.models";
+import { fetcher, randomPositionInBody } from "./libs/utils";
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const IMAGE_WIDTH = 300;
+const IMAGE_HEIGHT = 300;
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [loading, setLoading] = useState(true); // Start with loading true for initial fetch
+  const [images, setImages] = useState<UnsplashPhoto[]>([]);
+  const [centerImageId, setCenterImageId] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const handleSearch = useCallback(async (query: string) => {
+    setLoading(true);
+    try {
+      const res = await fetcher(query);
+      setImages(res.data);
+      if (res.data.length > 0) {
+        // If no center image is set, or the current center image is not in the new list, set the first image as center.
+        if (!centerImageId || !res.data.find((img: UnsplashPhoto) => img.id === centerImageId)) {
+          setCenterImageId(res.data[0].id);
+        }
+      } else {
+        setCenterImageId(null); // No images, no center
+      }
+    } catch (error) {
+      console.error("Failed to fetch images:", error);
+      setImages([]); // Clear images on error
+      setCenterImageId(null);
+    }
+    setLoading(false);
+  }, [centerImageId]); // Include centerImageId in dependencies as its check influences setCenterImageId
+
+  useEffect(() => {
+    // Initial search on component mount
+    handleSearch("japanese landscape");
+  }, [handleSearch]); // handleSearch is memoized, so this runs once on mount effectively
+
+  const handleImageSelect = useCallback((selectedImage: UnsplashPhoto) => {
+    setCenterImageId(selectedImage.id);
+    const searchQuery = selectedImage.alt_description || "japanese aesthetic"; // Use alt_description or a sensible default
+    handleSearch(searchQuery);
+  }, [handleSearch]);
+
+  const renderImages = useCallback(() => {
+    if (loading && images.length === 0) {
+      // Optionally, show a global loading spinner or placeholder here
+      return <p className="text-center text-xl mt-10">Loading images...</p>;
+    }
+
+    const imageElements = [];
+    let centerImgRect: Rect | null = null;
+
+    const centerImage = images.find((img: UnsplashPhoto) => img.id === centerImageId);
+
+    // 1. Position and render the center image first
+    if (centerImage) {
+      const position = randomPositionInBody(IMAGE_WIDTH, IMAGE_HEIGHT, { isCenter: true });
+      if (position) {
+        centerImgRect = { ...position, width: IMAGE_WIDTH, height: IMAGE_HEIGHT };
+        imageElements.push(
+          <div key={centerImage.id}>
+            {/* TODO: Ensure UnsplashImage props (IImageProps) accept onClick and isCenter */}
+            <UnsplashImage
+              src={centerImage.urls.regular}
+              alt={centerImage.alt_description ?? "Center image"}
+              position={position}
+              width={IMAGE_WIDTH}
+              height={IMAGE_HEIGHT}
+              tilt={0}
+              user={{
+                username: centerImage.user.username,
+                avatar: centerImage.user.profile_image.medium,
+                profile_url: centerImage.user.links.html,
+              }}
+              link={centerImage.links.html}
+              onClick={() => handleImageSelect(centerImage)}
+              isCenter={true}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
+          </div>
+        );
+      }
+    }
+
+    // 2. Position and render other images
+    const otherImages = images.filter((img: UnsplashPhoto) => img.id !== centerImageId);
+    const placedSideImageRects: Rect[] = [];
+
+    for (const image of otherImages) {
+      const positionOptions = {
+        existingRects: [...placedSideImageRects],
+        centerRect: centerImgRect || undefined, // Pass undefined if centerImgRect is null
+        maxAttempts: 100,
+      };
+      const position = randomPositionInBody(
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT,
+        positionOptions
+      );
+
+      const tilt = Math.random() * 10 - 5;
+
+      if (position) {
+        placedSideImageRects.push({
+          x: position.x,
+          y: position.y,
+          width: IMAGE_WIDTH,
+          height: IMAGE_HEIGHT,
+        });
+
+        imageElements.push(
+          <div key={image.id}>
+            {/* TODO: Ensure UnsplashImage props (IImageProps) accept onClick and isCenter */}
+            <UnsplashImage
+              src={image.urls.regular}
+              alt={image.alt_description ?? "Image"}
+              position={position}
+              width={IMAGE_WIDTH}
+              height={IMAGE_HEIGHT}
+              tilt={tilt}
+              user={{
+                username: image.user.username,
+                avatar: image.user.profile_image.medium,
+                profile_url: image.user.links.html,
+              }}
+              link={image.links.html}
+              onClick={() => handleImageSelect(image)}
+              isCenter={false}
+            />
+          </div>
+        );
+      }
+    }
+    return imageElements;
+  }, [images, centerImageId, handleImageSelect, loading]);
+
+  return (
+    <div>
+      {/* TODO: Ensure Input props (IInputProps) accept onSearch */}
+      <Input loading={loading} onSearch={handleSearch} />
+      <div className="relative w-full h-full min-h-screen">
+        {renderImages()}
+      </div>
+      <p className="text-center text-sm text-gray-400 fixed bottom-4 right-4">
+        Powered by{" "}
         <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+          href="https://unsplash.com"
           target="_blank"
           rel="noopener noreferrer"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
+          Unsplash
         </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </p>
     </div>
   );
 }
