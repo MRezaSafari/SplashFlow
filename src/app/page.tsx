@@ -1,4 +1,5 @@
 "use client";
+import { IconLoader2 } from "@tabler/icons-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input, UnsplashImage } from "./libs/components";
@@ -49,10 +50,11 @@ const renderSingleImageAndRect = (
   const element = (
     <motion.div
       key={image.id}
+      layout
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1, backdropFilter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.3 }}
+      exit={{ opacity: 0, scale: 0.9, backdropFilter: "blur(10px)" }}
+      transition={{ duration: 0.4 }}
     >
       <UnsplashImage
         src={image.urls.regular}
@@ -76,83 +78,146 @@ const renderSingleImageAndRect = (
 };
 
 const Home = () => {
-  const [loading, setLoading] = useState(true); // Start with loading true for initial fetch
-  const [images, setImages] = useState<UnsplashPhoto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [imagesForRender, setImagesForRender] = useState<UnsplashPhoto[]>([]);
   const [centerImageId, setCenterImageId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("japanese aesthetic");
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [targetImageForCenter, setTargetImageForCenter] =
+    useState<UnsplashPhoto | null>(null);
 
   const handleSearch = useCallback(
     async (query: string) => {
+      if (isTransitioning) return;
       setLoading(true);
       try {
-        const res = await fetcher(query);
-        setImages(res.data);
-        if (res.data.length > 0) {
-          // If no center image is set, or the current center image is not in the new list, set the first image as center.
+        const fetchedImages = await fetcher(query).then(
+          (res) => res.data as UnsplashPhoto[]
+        );
+
+        if (fetchedImages.length > 0) {
+          let newCenterId = centerImageId;
           if (
-            !centerImageId ||
-            !res.data.find((img: UnsplashPhoto) => img.id === centerImageId)
+            !newCenterId ||
+            !fetchedImages.find((img) => img.id === newCenterId)
           ) {
-            setCenterImageId(res.data[0].id);
+            newCenterId = fetchedImages[0].id;
+          }
+          setCenterImageId(newCenterId);
+
+          const centerImgInstance = fetchedImages.find(
+            (img) => img.id === newCenterId
+          );
+          const otherImgs = fetchedImages.filter(
+            (img) => img.id !== newCenterId
+          );
+
+          if (centerImgInstance) {
+            setImagesForRender([centerImgInstance, ...otherImgs]);
+          } else {
+            setImagesForRender(fetchedImages);
+            if (fetchedImages.length > 0) setCenterImageId(fetchedImages[0].id);
+            else setCenterImageId(null);
           }
         } else {
-          setCenterImageId(null); // No images, no center
+          setCenterImageId(null);
+          setImagesForRender([]);
         }
       } catch (error) {
         console.error("Failed to fetch images:", error);
-        setImages([]); // Clear images on error
+        setImagesForRender([]);
         setCenterImageId(null);
       }
       setLoading(false);
     },
-    [centerImageId]
+    [centerImageId, isTransitioning]
   );
 
-  // Create a debounced version of handleSearch
   const debouncedHandleSearch = useMemo(
-    () => debounce(handleSearch, 800),
+    () =>
+      debounce((query: string) => {
+        handleSearch(query);
+      }, 800),
     [handleSearch]
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only initial load
   useEffect(() => {
-    // Initial search on component mount
     handleSearch("japanese landscape");
   }, []);
 
-  const handleImageSelect = useCallback(
+  const handleImageClick = useCallback(
     (selectedImage: UnsplashPhoto) => {
-      setCenterImageId(selectedImage.id);
+      if (isTransitioning || selectedImage.id === centerImageId) return;
 
-      // get first 3 words of alt_description
-      const searchQuery =
-        selectedImage.alt_description?.split(" ").slice(0, 3).join(" ") ||
-        "japanese aesthetic"; // Use alt_description or a sensible default
-      setSearchQuery(searchQuery);
-      handleSearch(searchQuery);
+      setIsTransitioning(true);
+      setTargetImageForCenter(selectedImage);
+      setImagesForRender([selectedImage]);
     },
-    [handleSearch]
+    [isTransitioning, centerImageId]
   );
 
+  const onExitAnimationsDone = useCallback(async () => {
+    if (targetImageForCenter) {
+      const currentClickedImage = targetImageForCenter;
+      setCenterImageId(currentClickedImage.id);
+
+      const newSearchQuery =
+        currentClickedImage.alt_description?.split(" ").slice(0, 3).join(" ") ||
+        "japanese aesthetic";
+      setSearchQuery(newSearchQuery);
+
+      setLoading(true);
+      try {
+        const fetchedPeripheralImages = await fetcher(newSearchQuery).then(
+          (res) => res.data as UnsplashPhoto[]
+        );
+
+        const otherImages = fetchedPeripheralImages.filter(
+          (img) => img.id !== currentClickedImage.id
+        );
+        setImagesForRender([currentClickedImage, ...otherImages]);
+      } catch (error) {
+        console.error("Failed to fetch peripheral images:", error);
+        setImagesForRender([currentClickedImage]);
+      } finally {
+        setLoading(false);
+        setIsTransitioning(false);
+        setTargetImageForCenter(null);
+      }
+    } else {
+      setIsTransitioning(false);
+      setTargetImageForCenter(null);
+    }
+  }, [targetImageForCenter]);
+
+  const renderLoading = () => {
+    return (
+      <p className="text-center text-xl mt-10 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center gap-2">
+        <IconLoader2 className="animate-spin" />
+        <span className="animate-pulse">Loading images...</span>
+      </p>
+    );
+  };
+
   const renderImages = useCallback(() => {
-    if (loading && images.length === 0) {
-      return <p className="text-center text-xl mt-10">Loading images...</p>;
+    if (loading && imagesForRender.length === 0 && !isTransitioning) {
+      return renderLoading();
     }
 
     const imageElements: React.ReactElement[] = [];
     let centerImgRect: Rect | null = null;
     const placedSideImageRects: Rect[] = [];
 
-    const centerImage = images.find(
+    const currentCenterDisplayImage = imagesForRender.find(
       (img: UnsplashPhoto) => img.id === centerImageId
     );
 
-    // 1. Render the center image
-    if (centerImage) {
+    if (currentCenterDisplayImage) {
       const { element, rect } = renderSingleImageAndRect(
-        centerImage,
+        currentCenterDisplayImage,
         true,
-        handleImageSelect,
+        handleImageClick,
         IMAGE_WIDTH,
         IMAGE_HEIGHT,
         { isCenter: true }
@@ -163,20 +228,22 @@ const Home = () => {
       }
     }
 
-    // 2. Render other images
-    const otherImages = images.filter(
+    const otherImagesToRender = imagesForRender.filter(
       (img: UnsplashPhoto) => img.id !== centerImageId
     );
 
-    for (const image of otherImages) {
+    for (const image of otherImagesToRender) {
       const { element, rect } = renderSingleImageAndRect(
         image,
         false,
-        handleImageSelect,
+        handleImageClick,
         IMAGE_WIDTH,
         IMAGE_HEIGHT,
         {
-          existingRects: [...placedSideImageRects],
+          existingRects: [
+            ...placedSideImageRects,
+            ...(centerImgRect ? [centerImgRect] : []),
+          ],
           centerRect: centerImgRect || undefined,
           maxAttempts: 100,
         }
@@ -188,28 +255,51 @@ const Home = () => {
       }
     }
     return imageElements;
-  }, [images, centerImageId, handleImageSelect, loading]);
+  }, [
+    imagesForRender,
+    centerImageId,
+    handleImageClick,
+    loading,
+    isTransitioning,
+  ]);
 
   return (
     <div>
-      <Input
-        loading={loading}
-        onSearch={debouncedHandleSearch}
-        value={searchQuery}
-      />
-      <div className="relative w-full h-full min-h-screen">
-        <AnimatePresence mode="wait">{renderImages()}</AnimatePresence>
+      <div className="flex justify-between items-center fixed bottom-3 px-4 right-0 left-0 w-full z-50">
+        <p className="text-sm text-gray-400">
+          Made with ❤️ by{" "}
+          <a
+            href="https://github.com/MRezaSafari"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Reza Safari
+          </a>
+        </p>
+        <Input
+          loading={loading || isTransitioning}
+          onSearch={debouncedHandleSearch}
+          value={searchQuery}
+          disabled={isTransitioning}
+        />
+
+        <p className="text-center text-sm text-gray-400">
+          Powered by{" "}
+          <a
+            href="https://unsplash.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Unsplash
+          </a>
+        </p>
       </div>
-      <p className="text-center text-sm text-gray-400 fixed bottom-4 right-4">
-        Powered by{" "}
-        <a
-          href="https://unsplash.com"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Unsplash
-        </a>
-      </p>
+
+      <div className="relative w-full h-full min-h-screen">
+        <AnimatePresence mode="wait" onExitComplete={onExitAnimationsDone}>
+          {renderImages()}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };
