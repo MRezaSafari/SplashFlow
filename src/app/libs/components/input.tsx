@@ -1,18 +1,29 @@
 import { IconLoader2 } from "@tabler/icons-react";
-
+import { useEffect, useRef } from "react";
 interface IInputProps {
   loading?: boolean;
   onSearch: (query: string) => void;
+  value?: string;
 }
 
-const Input = ({ loading = false, onSearch }: IInputProps) => {
+const Input = ({ loading = false, onSearch, value }: IInputProps) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.value = value || "";
+    }
+  }, [value]);
+
   return (
     <div className="bg-input-background/70 backdrop-blur-sm border border-border rounded-full px-4 py-2 fixed bottom-4 right-0 left-0 m-auto w-90 z-50">
       <input
+        ref={inputRef}
         type="text"
         placeholder="Search for images"
         className="bg-transparent outline-none w-full"
         onChange={(e) => onSearch(e.target.value)}
+        value={value}
       />
       {loading && (
         <div className="absolute right-4 top-1/2 -translate-y-1/2">

@@ -1,8 +1,10 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input, UnsplashImage } from "./libs/components";
 import type { UnsplashPhoto } from "./libs/models/unsplash.models";
 import { fetcher, randomPositionInBody } from "./libs/utils";
+import debounce from "./libs/utils/debounce.utils";
 
 interface Rect {
   x: number;
@@ -11,133 +13,178 @@ interface Rect {
   height: number;
 }
 
-const IMAGE_WIDTH = 300;
-const IMAGE_HEIGHT = 300;
+const IMAGE_WIDTH = 250;
+const IMAGE_HEIGHT = 250;
 
-export default function Home() {
+// Helper function to render a single image and return its element and rect
+const renderSingleImageAndRect = (
+  image: UnsplashPhoto,
+  isCenter: boolean,
+  onClick: (image: UnsplashPhoto) => void,
+  imageWidth: number,
+  imageHeight: number,
+  positionOptions?: {
+    existingRects?: Rect[];
+    centerRect?: Rect;
+    maxAttempts?: number;
+    isCenter?: boolean;
+  }
+): { element: React.ReactElement | null; rect: Rect | null } => {
+  const position = randomPositionInBody(
+    imageWidth,
+    imageHeight,
+    positionOptions
+  );
+
+  if (!position) return { element: null, rect: null };
+
+  const tilt = isCenter ? 0 : Math.random() * 10 - 5;
+  const rect = {
+    x: position.x,
+    y: position.y,
+    width: imageWidth,
+    height: imageHeight,
+  };
+
+  const element = (
+    <motion.div
+      key={image.id}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1, backdropFilter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.3 }}
+    >
+      <UnsplashImage
+        src={image.urls.regular}
+        alt={image.alt_description ?? (isCenter ? "Center image" : "Image")}
+        position={position}
+        width={imageWidth}
+        height={imageHeight}
+        tilt={tilt}
+        user={{
+          username: image.user.username,
+          avatar: image.user.profile_image.medium,
+          profile_url: image.user.links.html,
+        }}
+        link={image.links.html}
+        onClick={() => onClick(image)}
+        isCenter={isCenter}
+      />
+    </motion.div>
+  );
+  return { element, rect };
+};
+
+const Home = () => {
   const [loading, setLoading] = useState(true); // Start with loading true for initial fetch
   const [images, setImages] = useState<UnsplashPhoto[]>([]);
   const [centerImageId, setCenterImageId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("japanese aesthetic");
 
-  const handleSearch = useCallback(async (query: string) => {
-    setLoading(true);
-    try {
-      const res = await fetcher(query);
-      setImages(res.data);
-      if (res.data.length > 0) {
-        // If no center image is set, or the current center image is not in the new list, set the first image as center.
-        if (!centerImageId || !res.data.find((img: UnsplashPhoto) => img.id === centerImageId)) {
-          setCenterImageId(res.data[0].id);
+  const handleSearch = useCallback(
+    async (query: string) => {
+      setLoading(true);
+      try {
+        const res = await fetcher(query);
+        setImages(res.data);
+        if (res.data.length > 0) {
+          // If no center image is set, or the current center image is not in the new list, set the first image as center.
+          if (
+            !centerImageId ||
+            !res.data.find((img: UnsplashPhoto) => img.id === centerImageId)
+          ) {
+            setCenterImageId(res.data[0].id);
+          }
+        } else {
+          setCenterImageId(null); // No images, no center
         }
-      } else {
-        setCenterImageId(null); // No images, no center
+      } catch (error) {
+        console.error("Failed to fetch images:", error);
+        setImages([]); // Clear images on error
+        setCenterImageId(null);
       }
-    } catch (error) {
-      console.error("Failed to fetch images:", error);
-      setImages([]); // Clear images on error
-      setCenterImageId(null);
-    }
-    setLoading(false);
-  }, [centerImageId]); // Include centerImageId in dependencies as its check influences setCenterImageId
+      setLoading(false);
+    },
+    [centerImageId]
+  );
 
+  // Create a debounced version of handleSearch
+  const debouncedHandleSearch = useMemo(
+    () => debounce(handleSearch, 800),
+    [handleSearch]
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
   useEffect(() => {
     // Initial search on component mount
     handleSearch("japanese landscape");
-  }, [handleSearch]); // handleSearch is memoized, so this runs once on mount effectively
+  }, []);
 
-  const handleImageSelect = useCallback((selectedImage: UnsplashPhoto) => {
-    setCenterImageId(selectedImage.id);
-    const searchQuery = selectedImage.alt_description || "japanese aesthetic"; // Use alt_description or a sensible default
-    handleSearch(searchQuery);
-  }, [handleSearch]);
+  const handleImageSelect = useCallback(
+    (selectedImage: UnsplashPhoto) => {
+      setCenterImageId(selectedImage.id);
+
+      // get first 3 words of alt_description
+      const searchQuery =
+        selectedImage.alt_description?.split(" ").slice(0, 3).join(" ") ||
+        "japanese aesthetic"; // Use alt_description or a sensible default
+      setSearchQuery(searchQuery);
+      handleSearch(searchQuery);
+    },
+    [handleSearch]
+  );
 
   const renderImages = useCallback(() => {
     if (loading && images.length === 0) {
-      // Optionally, show a global loading spinner or placeholder here
       return <p className="text-center text-xl mt-10">Loading images...</p>;
     }
 
-    const imageElements = [];
+    const imageElements: React.ReactElement[] = [];
     let centerImgRect: Rect | null = null;
+    const placedSideImageRects: Rect[] = [];
 
-    const centerImage = images.find((img: UnsplashPhoto) => img.id === centerImageId);
+    const centerImage = images.find(
+      (img: UnsplashPhoto) => img.id === centerImageId
+    );
 
-    // 1. Position and render the center image first
+    // 1. Render the center image
     if (centerImage) {
-      const position = randomPositionInBody(IMAGE_WIDTH, IMAGE_HEIGHT, { isCenter: true });
-      if (position) {
-        centerImgRect = { ...position, width: IMAGE_WIDTH, height: IMAGE_HEIGHT };
-        imageElements.push(
-          <div key={centerImage.id}>
-            {/* TODO: Ensure UnsplashImage props (IImageProps) accept onClick and isCenter */}
-            <UnsplashImage
-              src={centerImage.urls.regular}
-              alt={centerImage.alt_description ?? "Center image"}
-              position={position}
-              width={IMAGE_WIDTH}
-              height={IMAGE_HEIGHT}
-              tilt={0}
-              user={{
-                username: centerImage.user.username,
-                avatar: centerImage.user.profile_image.medium,
-                profile_url: centerImage.user.links.html,
-              }}
-              link={centerImage.links.html}
-              onClick={() => handleImageSelect(centerImage)}
-              isCenter={true}
-            />
-          </div>
-        );
+      const { element, rect } = renderSingleImageAndRect(
+        centerImage,
+        true,
+        handleImageSelect,
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT,
+        { isCenter: true }
+      );
+      if (element && rect) {
+        centerImgRect = rect;
+        imageElements.push(element);
       }
     }
 
-    // 2. Position and render other images
-    const otherImages = images.filter((img: UnsplashPhoto) => img.id !== centerImageId);
-    const placedSideImageRects: Rect[] = [];
+    // 2. Render other images
+    const otherImages = images.filter(
+      (img: UnsplashPhoto) => img.id !== centerImageId
+    );
 
     for (const image of otherImages) {
-      const positionOptions = {
-        existingRects: [...placedSideImageRects],
-        centerRect: centerImgRect || undefined, // Pass undefined if centerImgRect is null
-        maxAttempts: 100,
-      };
-      const position = randomPositionInBody(
+      const { element, rect } = renderSingleImageAndRect(
+        image,
+        false,
+        handleImageSelect,
         IMAGE_WIDTH,
         IMAGE_HEIGHT,
-        positionOptions
+        {
+          existingRects: [...placedSideImageRects],
+          centerRect: centerImgRect || undefined,
+          maxAttempts: 100,
+        }
       );
 
-      const tilt = Math.random() * 10 - 5;
-
-      if (position) {
-        placedSideImageRects.push({
-          x: position.x,
-          y: position.y,
-          width: IMAGE_WIDTH,
-          height: IMAGE_HEIGHT,
-        });
-
-        imageElements.push(
-          <div key={image.id}>
-            {/* TODO: Ensure UnsplashImage props (IImageProps) accept onClick and isCenter */}
-            <UnsplashImage
-              src={image.urls.regular}
-              alt={image.alt_description ?? "Image"}
-              position={position}
-              width={IMAGE_WIDTH}
-              height={IMAGE_HEIGHT}
-              tilt={tilt}
-              user={{
-                username: image.user.username,
-                avatar: image.user.profile_image.medium,
-                profile_url: image.user.links.html,
-              }}
-              link={image.links.html}
-              onClick={() => handleImageSelect(image)}
-              isCenter={false}
-            />
-          </div>
-        );
+      if (element && rect) {
+        placedSideImageRects.push(rect);
+        imageElements.push(element);
       }
     }
     return imageElements;
@@ -145,10 +192,13 @@ export default function Home() {
 
   return (
     <div>
-      {/* TODO: Ensure Input props (IInputProps) accept onSearch */}
-      <Input loading={loading} onSearch={handleSearch} />
+      <Input
+        loading={loading}
+        onSearch={debouncedHandleSearch}
+        value={searchQuery}
+      />
       <div className="relative w-full h-full min-h-screen">
-        {renderImages()}
+        <AnimatePresence mode="wait">{renderImages()}</AnimatePresence>
       </div>
       <p className="text-center text-sm text-gray-400 fixed bottom-4 right-4">
         Powered by{" "}
@@ -162,4 +212,6 @@ export default function Home() {
       </p>
     </div>
   );
-}
+};
+
+export default Home;

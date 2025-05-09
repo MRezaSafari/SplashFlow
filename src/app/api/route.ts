@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
 	try {
 		const res = await fetch(
-			`https://api.unsplash.com/search/photos?page=1&query=${query}`,
+			`https://api.unsplash.com/search/photos?per_page=15&query=${query}`,
 			{ headers: { Authorization: `Client-ID ${accessKey}` } },
 		);
 		const json = await res.json(); // full Unsplash response
