@@ -30,4 +30,12 @@ interface UnsplashPhotoResponse {
 	data: UnsplashPhoto[];
 }
 
-export type { UnsplashPhoto, UnsplashPhotoResponse };
+interface Rect {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+export type { Rect, UnsplashPhoto, UnsplashPhotoResponse };
+

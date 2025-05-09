@@ -1,81 +1,14 @@
 "use client";
 import { IconLoader2 } from "@tabler/icons-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Input, UnsplashImage } from "./libs/components";
-import type { UnsplashPhoto } from "./libs/models/unsplash.models";
-import { fetcher, randomPositionInBody } from "./libs/utils";
+import { Input, renderSingleImageAndRect } from "./libs/components";
+import type { Rect, UnsplashPhoto } from "./libs/models/unsplash.models";
+import { fetcher } from "./libs/utils";
 import debounce from "./libs/utils/debounce.utils";
-
-interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 
 const IMAGE_WIDTH = 250;
 const IMAGE_HEIGHT = 250;
-
-// Helper function to render a single image and return its element and rect
-const renderSingleImageAndRect = (
-  image: UnsplashPhoto,
-  isCenter: boolean,
-  onClick: (image: UnsplashPhoto) => void,
-  imageWidth: number,
-  imageHeight: number,
-  positionOptions?: {
-    existingRects?: Rect[];
-    centerRect?: Rect;
-    maxAttempts?: number;
-    isCenter?: boolean;
-  }
-): { element: React.ReactElement | null; rect: Rect | null } => {
-  const position = randomPositionInBody(
-    imageWidth,
-    imageHeight,
-    positionOptions
-  );
-
-  if (!position) return { element: null, rect: null };
-
-  const tilt = isCenter ? 0 : Math.random() * 10 - 5;
-  const rect = {
-    x: position.x,
-    y: position.y,
-    width: imageWidth,
-    height: imageHeight,
-  };
-
-  const element = (
-    <motion.div
-      key={image.id}
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1, backdropFilter: "blur(0px)" }}
-      exit={{ opacity: 0, scale: 0.9, backdropFilter: "blur(10px)" }}
-      transition={{ duration: 0.4 }}
-    >
-      <UnsplashImage
-        src={image.urls.regular}
-        alt={image.alt_description ?? (isCenter ? "Center image" : "Image")}
-        position={position}
-        width={imageWidth}
-        height={imageHeight}
-        tilt={tilt}
-        user={{
-          username: image.user.username,
-          avatar: image.user.profile_image.medium,
-          profile_url: image.user.links.html,
-        }}
-        link={image.links.html}
-        onClick={() => onClick(image)}
-        isCenter={isCenter}
-      />
-    </motion.div>
-  );
-  return { element, rect };
-};
 
 const Home = () => {
   const [loading, setLoading] = useState(true);
@@ -280,7 +213,6 @@ const Home = () => {
           loading={loading || isTransitioning}
           onSearch={debouncedHandleSearch}
           value={searchQuery}
-          disabled={isTransitioning}
         />
 
         <p className="text-center text-sm text-gray-400">
