@@ -2,7 +2,11 @@
 
 ## DEMO
 
-[Next.js](https://nextjs.org/) (React Framework)
+**LIVE DEMO**: [https://splash-flow.vercel.app/](https://splash-flow.vercel.app/)
+
+<video src="demo.webm" controls autoplay></video>
+
+![Watch the video](demo.png)
 
 ## Purpose
 
